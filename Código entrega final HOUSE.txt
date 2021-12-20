@@ -1,0 +1,246 @@
+
+import sys, os
+
+sys.path.append("/home/ros2/jsebas/src/my_package/my_package")
+from fns import modelCreate
+import cv2
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from cv_bridge import CvBridge
+import matplotlib.pyplot as plt
+from rclpy.qos import QoSProfile
+from sensor_msgs.msg import Image
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+from rclpy.qos import qos_profile_sensor_data
+
+class Turtlebot3ObstacleDetection(Node):
+    def __init__(self):
+        super().__init__('turtlebot3_obstacle_detection')
+        self.model = modelCreate()
+        """************************************************************
+        ** Initialise variables
+        ************************************************************"""
+        self.image = []
+        self.scan_ranges = []
+        self.bridge = CvBridge()
+        self.init_scan_state = False  # To get the initial scan data at the beginning
+        self.Cuno=[]
+        self.Cdos=[]
+        self.Ctres=[]
+        self.Ccuatro=[]
+        self.Iuno=[]
+        self.Idos=[]
+        self.Itres=[]
+        self.Icuatro=[]
+        self.Runo=[]
+        self.Rdos=[]
+        self.Rtres=[]
+        self.Rcuatro=[]
+        self.max3=[]
+        self.max6=[]
+        self.max9=[]
+
+        """************************************************************
+        ** Initialise ROS publishers and subscribers
+        ************************************************************"""
+        qos = QoSProfile(depth=10)
+
+        # Initialise publishers
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', qos)
+
+        # Initialise subscribers
+        self.scan_sub = self.create_subscription(LaserScan, 'scan', self.scan_callback, qos_profile=qos_profile_sensor_data)
+        self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, qos_profile=qos_profile_sensor_data)
+
+        """************************************************************
+        ** Initialise timers
+        ************************************************************"""
+        self.update_timer = self.create_timer(0.010, self.update_callback)
+
+        self.get_logger().info("Turtlebot3 obstacle detection node has been initialised.")
+
+        
+        
+
+    """*******************************************************************************
+    ** Callback functions and relevant functions
+    *******************************************************************************"""
+    def scan_callback(self, msg):
+        self.scan_ranges = msg.ranges
+        self.init_scan_state = True
+
+    def image_callback(self, msg):
+        self.image = msg
+        cvImage = self.bridge.imgmsg_to_cv2(self.image, "bgr8")
+
+        out = self.model.predict_segmentation(inp=cvImage)
+        
+        # Se recorta la imagen y se secciono en tres pedazos, IM, CM y RM
+        out=out[50:180,:]
+        IM = out[:,0:80]
+        CM = out[:,81:239]
+        RM = out[:,240:320]
+       
+        max1=0
+        max2=0
+
+        #Contar la cantidad pixeles clasificados y seleccionar la clase que predomina.
+        IoneCount = np.count_nonzero(IM == 1)
+        self.Iuno=IoneCount
+        if self.Iuno > max1:
+            max1=self.Iuno
+            max2=1
+        IdosCount = np.count_nonzero(IM == 2)
+        self.Idos=IdosCount
+        if self.Idos > max1:
+            max1=self.Idos
+            max2=2
+        ItresCount = np.count_nonzero(IM == 3)
+        self.Itres=ItresCount
+        if self.Itres > max1:
+            max1=self.Itres
+            max2=3
+        IcuatroCount = np.count_nonzero(IM == 4)
+        self.Icuatro=IcuatroCount
+        if self.Icuatro > max1:
+            max1=self.Icuatro
+            max2=4
+        self.max3=max2
+
+        #maximo valor de Izquierda
+
+        max4=0
+        max5=0
+        ConeCount = np.count_nonzero(CM == 1)
+        self.Cuno=ConeCount
+        if self.Cuno > max4:
+            max4=self.Cuno
+            max5=1
+        CdosCount = np.count_nonzero(CM == 2)
+        self.Cdos=CdosCount
+        if self.Cdos > max4:
+            max4=self.Cdos
+            max5=2
+        CtresCount = np.count_nonzero(CM == 3)
+        self.Ctres=CtresCount
+        if self.Ctres > max4:
+            max4=self.Ctres
+            max5=3
+        CcuatroCount = np.count_nonzero(CM == 4)
+        self.Ccuatro=CcuatroCount
+        if self.Ccuatro > max4:
+            max4=self.Ccuatro
+            max5=4
+        self.max6=max5
+
+        #Maximo valor de centro
+
+        max7=0
+        max8=0
+        RoneCount = np.count_nonzero(RM == 1)
+        self.Runo=RoneCount
+        if self.Runo > max7:
+            max7=self.Runo
+            max8=1
+        RdosCount = np.count_nonzero(RM == 2)
+        self.Rdos=RdosCount
+        if self.Rdos > max7:
+            max7=self.Rdos
+            max8=2
+        RtresCount = np.count_nonzero(RM == 3)
+        self.Rtres=RtresCount
+        if self.Rtres > max7:
+            max7=self.Rtres
+            max8=3
+        RcuatroCount = np.count_nonzero(RM == 4)
+        self.Rcuatro=RcuatroCount
+        if self.Rcuatro > max7:
+            max7=self.Rcuatro
+            max8=4
+        self.max9=max8
+        print (IoneCount, IdosCount, ItresCount, IcuatroCount)
+        print (ConeCount, CdosCount, CtresCount, CcuatroCount)
+        print (RoneCount, RdosCount, RtresCount, RcuatroCount)
+
+        #Maximo valor derecho
+
+    def update_callback(self):
+        if self.init_scan_state is True:
+            self.detect_obstacle()
+
+    def detect_obstacle(self):
+        twist = Twist()
+        obstacle_distance = min(self.scan_ranges)
+        # Lectura de lidar
+        mitd=self.scan_ranges[0:15]
+        miti=self.scan_ranges[344:359]
+
+        # Clasificaciòn de rangos del lidar
+        total1=(np.asarray(mitd))
+        total2=np.asarray(miti)
+
+        total1[total1<1.5] = 1
+        total1[total1>1.5] = 2 
+
+        total2[total2<1.5] = 1
+        total2[total2>1.5] = 2 
+
+        print ("Total_1: ", np.mean(total1))
+        print ("Total_2: ", np.mean(total2))
+        print (" ")
+
+        # Variables condicionales
+        vect = np.array([self.max3,self.max6,self.max9])
+        vect1 = [4,4,4]
+        basura = [1,1,1]
+        print("Vector_01", vect)
+        print("Selfs", self.max3, self.max6, self.max9)
+        
+        i = 0
+
+        # Se utilizo este valor como condicional para detener el robot al detectar la caneca.
+        if self.max6 == 1:
+           
+            twist.linear.x = 0.0
+            twist.angular.z = 0.0
+            print("Vector", vect)
+            i = 1
+            print ("i_1", i)
+
+        safety_distance = 0
+
+        # Condicionar los valores del lidar para mover el robot.
+
+        if np.mean(total1) >= 1.6 and np.mean(total2) < 1.6:
+
+            twist.angular.z = 0.1
+
+        elif np.mean(total2) >= 1.6 and np.mean(total1) < 1.6:
+
+            twist.angular.z = -0.1
+
+        elif np.mean(total2) <= 1.1 and np.mean(total1) <= 1.1 and i == 0:
+            
+            twist.angular.z = -0.1
+            print ("i_2",i)
+
+        else:
+            if i == 0:
+                twist.linear.x = 0.15
+
+        self.cmd_vel_pub.publish(twist)
+
+def main(args=None):
+    print('start')
+    rclpy.init(args=args)
+    turtlebot3_obstacle_detection = Turtlebot3ObstacleDetection()
+    rclpy.spin(turtlebot3_obstacle_detection)
+
+    turtlebot3_obstacle_detection.destroy_node()
+    rclpy.shutdown()
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
